@@ -1,9 +1,8 @@
 import argparse
 import json
 import os
+import subprocess
 from pathlib import Path
-import whisperx
-from whisperx.diarize import DiarizationPipeline
 from mistralai import Mistral
 import httpx
 # import gc
@@ -19,41 +18,25 @@ def load_settings():
   return settings
 
 def convert_audio_to_text(audio_file, hf_token):
-  # $ whisperx "2025-07-17 13-40-38.mkv" --compute_type int8 --device cpu --hf_token <token> --diarize --language ru --output_format txt
-
-  model = whisperx.load_model("large-v2", 'cpu', compute_type='int8', download_root='.model', language='ru')
-
-  audio = whisperx.load_audio(audio_file)
-  result = model.transcribe(audio, batch_size=4)
-  print(result["segments"]) # before alignment
-
-  # delete model if low on GPU resources
-  # import gc; import torch; gc.collect(); torch.cuda.empty_cache(); del model
-
-  model_a, metadata = whisperx.load_align_model(language_code=result["language"], device='cpu')
-  result = whisperx.align(result["segments"], model_a, metadata, audio, 'cpu', return_char_alignments=False)
-
-  print(result["segments"]) # after alignment
-
-  # delete model if low on GPU resources
-  # import gc; import torch; gc.collect(); torch.cuda.empty_cache(); del model_a
-
-  diarize_model = DiarizationPipeline(token=hf_token, device='cpu')
-  diarize_segments = diarize_model(audio)
-
-  result = whisperx.assign_word_speakers(diarize_segments, result)
-  print(diarize_segments)
-  print(result["segments"]) # segments are now assigned speaker IDs
-
-  lines = ''
-  speaker = ''
-  for segment in result["segments"]:
-    if speaker == segment['speaker']:
-      lines += segment['text'] + ' '
-    else:
-      lines += f"\n[{segment['speaker']}]:{segment['text']}"
-      speaker = segment['speaker']
-
+  subprocess.Popen(f"whisperx \"{audio_file}\" --compute_type int8 --device cpu --hf_token {hf_token} --diarize --language ru --output_format txt")
+  
+  result_file = os.path.splitext(audio_file)[0] + ".txt"
+  if os.path.exists(result_file):
+    text_lines = open(result_file, "r", encoding="utf-8").read().splitlines()
+    
+    lines = ''
+    last_speaker = ''
+    for line in text_lines:
+      current_speaker, text = line.split(': ')
+      if current_speaker == last_speaker:
+        lines += text + ' '
+      else:
+        lines += f"\n{current_speaker}: {text}"
+        last_speaker = current_speaker
+  else:
+    print(f"Cannot find transcription file {result_file}")
+    exit(1)
+  
   return lines
 
 def convert_text_to_mom(text_file, mistral_api_key):
@@ -105,7 +88,7 @@ def main():
 
   if args.audio:
     audio_file = args.audio
-    text_file = os.path.splitext(audio_file)[0] + ".txt"
+    text_file = os.path.splitext(audio_file)[0] + "-ts.txt"
     mom_file = os.path.splitext(audio_file)[0] + "-mom.md"
     if os.path.exists(audio_file):
       text = convert_audio_to_text(audio_file, hf_token)
