@@ -68,7 +68,9 @@ MOM должен быть составлен в формате Markdown согл
       {"role": "user", "content": text}
     ]
   )
-  return response.choices[0].message.content
+
+  mom_text = response.choices[0].message.content
+  return mom_text
 
 def parse_arguments():
   parser = argparse.ArgumentParser(
